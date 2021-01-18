@@ -1,5 +1,3 @@
-use crate::utils::Vec2;
-
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 use web_sys::{CanvasRenderingContext2d, OffscreenCanvas};
@@ -56,7 +54,7 @@ pub struct Square {
   x: f64,
   y: f64,
   length: f64,
-  bounds: Vec2<f64>,
+  bounds: (f64, f64),
 }
 
 impl Square {
@@ -67,7 +65,7 @@ impl Square {
       x: 0.,
       y: 0.,
       length: canvas.height() as f64 / 10.,
-      bounds: Vec2(canvas.width() as f64, canvas.height() as f64),
+      bounds: (canvas.width() as f64, canvas.height() as f64),
     }
   }
 

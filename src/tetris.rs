@@ -1,12 +1,33 @@
-use crate::utils::{Vec2, Vec3};
-
 use getrandom;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 use web_sys::console;
 use web_sys::{CanvasRenderingContext2d, OffscreenCanvas, Performance};
 
+use nalgebra as na;
+use na::{Matrix3x4, Matrix3};
+
 const PLAYFIELD_DIM: (usize, usize) = (10, 20);
+
+#[derive(Copy, Clone)]
+pub enum RotationState {
+  Deg0,
+  Deg90,
+  Deg180,
+  Deg270,
+}
+
+impl RotationState {
+  pub fn get_next_state(&self, dir: RotationDirection) -> Self {
+    use RotationDirection::*;
+    match *self {
+      Self::Deg0 => if let Clockwise = dir { Self::Deg90 } else { Self::Deg270 },
+      Self::Deg90 => if let Clockwise = dir { Self::Deg180 } else { Self::Deg0},
+      Self::Deg180 => if let Clockwise = dir { Self::Deg270 } else { Self::Deg90 },
+      Self::Deg270 => if let Clockwise = dir { Self::Deg0 } else { Self::Deg180 },
+    }
+  }
+}
 
 pub enum MoveDirection {
   Up,
@@ -15,6 +36,7 @@ pub enum MoveDirection {
   Right,
 }
 
+#[derive(Copy, Clone)]
 pub enum RotationDirection {
   Clockwise,
   CounterClockwise,
@@ -49,15 +71,12 @@ impl Tetris {
       .dyn_into::<CanvasRenderingContext2d>()
       .unwrap();
 
-    // let bounds = Vec2(height / 2_f64, height); // width is based on height
-    // let velocity = Vec2(bounds.0 / PLAYFIELD_DIM.0 as f64, bounds.1 / PLAYFIELD_DIM.1 as f64);
-
     let square = {
       let square_length = canvas.height() as f64 / PLAYFIELD_DIM.1 as f64;
       let square_padding = (square_length * 0.1_f64).sqrt();
       Square::new(square_length, square_padding)
     };
-    let obj = Block::new(BlockType::O);
+    let obj = Block::new(BlockType::S);
     let playfield = vec![0; PLAYFIELD_DIM.0 * PLAYFIELD_DIM.1];
 
     // get timer from global scope
@@ -80,11 +99,12 @@ impl Tetris {
   }
 
   pub fn render(&self) {
+
     // draw object
-    for p in &self.obj.pos {
+    for col in self.obj.pos.column_iter() {
       self
         .square
-        .draw(&self.ctx, Vec2(p.0 as f64, p.1 as f64), &self.obj.color);
+        .draw(&self.ctx, (col[(0, 0)] as f64, col[(1, 0)] as f64), &self.obj.color);
     }
 
     // draw playfield
@@ -102,7 +122,7 @@ impl Tetris {
         };
         self.square.draw(
           &self.ctx,
-          Vec2((i % 10) as f64, (i as f64 / PLAYFIELD_DIM.0 as f64).floor()),
+          ((i % 10) as f64, (i as f64 / PLAYFIELD_DIM.0 as f64).floor()),
           color,
         );
       }
@@ -131,12 +151,10 @@ impl Tetris {
         self
           .obj
           .pos
-          .iter()
-          .for_each(|p| playfield[PLAYFIELD_DIM.0 * p.1 as usize + p.0 as usize] = block_type);
+          .column_iter()
+          .for_each(|col| playfield[PLAYFIELD_DIM.0 * col[(1,0)] as usize + col[(0,0)] as usize] = block_type);
 
         // clear lines if any
-
-        // find lines
         let copy_map: Vec<(usize, usize)> = playfield
           .chunks_exact(PLAYFIELD_DIM.0) // get each row
           .map(|chunk| chunk.iter().any(|&val| val == 0)) // find which rows will stay
@@ -152,13 +170,7 @@ impl Tetris {
 
         // TODO clumps, cascade
         copy_map.iter().for_each(|&(i, j)| {
-          // console::log_3(
-          //   &"Logging arbitrary values looks like".into(),
-          //   &JsValue::from(i as u32),
-          //   &JsValue::from(j as u32),
-          // );
-          if i != j {
-            // line stays where it is
+          if i != j { // if line is going to drop
             let src_idx = i * PLAYFIELD_DIM.0;
             let dest_idx = j * PLAYFIELD_DIM.0;
             playfield.copy_within(src_idx..(src_idx + PLAYFIELD_DIM.0), dest_idx); // copy over the row that will be dropping
@@ -197,13 +209,16 @@ impl Tetris {
         Move(dir) => {
           let _ = self.move_obj(dir).ok();
         }
-        Rotate(dir) => self.rotate_obj(&dir),
+        Rotate(dir) => self.rotate_obj(dir),
       }
     };
   }
 
-  fn rotate_obj(&mut self, dir: &RotationDirection) {
-    // check if we can rotate
+  fn rotate_obj(&mut self, dir: RotationDirection) {
+    let (next_pos, next_rot_state) = self.obj.try_rotate(dir);
+    // TODO: check if we can rotate
+    self.obj.pos= next_pos;
+    self.obj.rot_state = next_rot_state;
   }
 
   fn move_obj(&mut self, dir: MoveDirection) -> Result<(), ()> {
@@ -212,24 +227,27 @@ impl Tetris {
     // check if in bounds
     use MoveDirection::*;
     let within_bounds: bool = match dir {
+      // TODO: puts great assumption on the last moves were valid (if we were to be in an invalid state, some checks will not be run)
       Up => false,
       Down => next_pos
-        .iter()
-        .all(|&Vec2(_, y)| y < PLAYFIELD_DIM.1 as isize),
-      Left => next_pos.iter().all(|&Vec2(x, _)| x >= 0),
+        .column_iter()
+        .all(|col| col[(1, 0)] < PLAYFIELD_DIM.1 as isize), // y val
+      Left => next_pos
+        .column_iter()
+        .all(|col| col[(0, 0)] >= 0), // x val
       Right => next_pos
-        .iter()
-        .all(|&Vec2(x, _)| x < PLAYFIELD_DIM.0 as isize),
+        .column_iter()
+        .all(|col| col[(0, 0)] < PLAYFIELD_DIM.0 as isize),
     };
 
     // check if block is going to freeze
     let can_move: bool = within_bounds
       && next_pos
-        .iter()
-        .all(|&Vec2(x, y)| self.playfield[PLAYFIELD_DIM.0 * y as usize + x as usize] == 0);
+        .column_iter()
+        .all(|col| self.playfield[PLAYFIELD_DIM.0 * col[(1, 0)] as usize + col[(0, 0)] as usize] == 0);
 
     if can_move {
-      self.obj.set_pos(next_pos);
+      self.obj.pos = next_pos;
       Ok(())
     } else {
       Err(())
@@ -270,61 +288,162 @@ impl Randomizable for BlockType {
 
 pub struct Block {
   color: &'static str,
+  pub rot_state: RotationState,
   pub block_type: BlockType,
-  pub pos: [Vec2<isize>; 4],
+  pub pos: Matrix3x4<isize>,
+  // TODO: pointers pointing to pivot
 }
 
 impl Block {
   pub fn new(block_type: BlockType) -> Self {
     use BlockType::*;
+
     let (pos, color) = match block_type {
       // TODO random rotation
-      I => ([Vec2(2, 0), Vec2(2, 1), Vec2(2, 2), Vec2(2, 3)], "red"),
-      J => ([Vec2(0, 1), Vec2(1, 1), Vec2(2, 1), Vec2(2, 2)], "orange"),
-      L => ([Vec2(0, 1), Vec2(1, 1), Vec2(2, 1), Vec2(2, 0)], "yellow"),
-      O => ([Vec2(1, 1), Vec2(1, 2), Vec2(2, 1), Vec2(2, 2)], "green"),
-      S => ([Vec2(1, 1), Vec2(2, 1), Vec2(0, 2), Vec2(1, 2)], "blue"),
-      T => ([Vec2(0, 1), Vec2(1, 1), Vec2(1, 2), Vec2(2, 1)], "indigo"),
-      Z => ([Vec2(0, 1), Vec2(1, 1), Vec2(1, 2), Vec2(2, 2)], "pink"),
+      I => (Matrix3x4::new(0, 1, 2, 3,
+                           2, 2, 2, 2,
+                           1, 1, 1, 1), "red"),
+
+      J => (Matrix3x4::new(0, 1, 2, 2,
+                           1, 1, 1, 2,
+                           1, 1, 1, 1), "orange"),
+
+      L => (Matrix3x4::new(0, 1, 2, 2,
+                           1, 1, 1, 0,
+                           1, 1, 1, 1), "yellow"),
+
+      O => (Matrix3x4::new(1, 1, 2, 2,
+                           1, 2, 1, 2,
+                           1, 1, 1, 1), "green"),
+
+      S => (Matrix3x4::new(1, 2, 0, 1,
+                           1, 1, 2, 2,
+                           1, 1, 1, 1), "blue"),
+
+      T => (Matrix3x4::new(0, 1, 1, 2,
+                           1, 1, 2, 1,
+                           1, 1, 1, 1), "indigo"),
+
+      Z => (Matrix3x4::new(0, 1, 1, 2,
+                           1, 1, 2, 2,
+                           1, 1, 1, 1), "pink"),
     };
+
+    let rot_state = RotationState::Deg0;
 
     Self {
       pos,
       color,
       block_type,
+      rot_state,
     }
   }
 
-  pub fn set_pos(&mut self, new_pos: [Vec2<isize>; 4]) {
-    self.pos = new_pos;
+  pub fn try_rotate(&self, mut dir: RotationDirection) -> (Matrix3x4<isize>, RotationState) {
+    let current_pos = self.pos.clone();
+
+    use BlockType::*;
+    match self.block_type {
+      O => (current_pos, self.rot_state),
+      _ => {
+        let mut next_rot_state = self.rot_state;
+        
+        use RotationState::*;
+        match (self.block_type, self.rot_state) {
+          (I, Deg0) => {
+            // only two states, 0 and 90
+            // if 0, rotate clockwise
+            // if 90, rotate cclockwise
+            next_rot_state = Deg90;
+            dir = Clockwise;
+          },
+          (I, Deg90) => {
+            next_rot_state = Deg0;
+            dir = CounterClockwise;
+          },
+          (J, _) | (L, _) | (T, _) => {
+            next_rot_state = self.rot_state.get_next_state(dir);
+          },
+          (S, Deg0) | (Z, Deg0)=> {
+            // only two states, 0 and 270
+            // if 0, rotate cclockwise
+            // if 270, rotate clockwise 
+            next_rot_state = Deg270;
+            dir = CounterClockwise;
+          },
+          (S, Deg270) | (Z, Deg270)=> {
+            next_rot_state = Deg0;
+            dir = Clockwise;
+          },
+          _ => ()
+        };
+
+        // get pivot
+        let (pivot_x, pivot_y) = match self.block_type {
+          I => (current_pos[(0, 2)], current_pos[(1, 2)]),
+          J => (current_pos[(0, 1)], current_pos[(1, 1)]),
+          L => (current_pos[(0, 1)], current_pos[(1, 1)]),
+          O => (current_pos[(0, 0)], current_pos[(1, 0)]),
+          S => (current_pos[(0, 0)], current_pos[(1, 0)]),
+          T => (current_pos[(0, 1)], current_pos[(1, 1)]),
+          Z => (current_pos[(0, 1)], current_pos[(1, 1)]),
+        };
+
+        use RotationDirection::*;
+        let (r_a, r_b) = match dir { 
+          Clockwise => (-1, 1),
+          CounterClockwise => (1, -1),
+        };
+
+        // console::log_3(
+        //   &"Logging arbitrary values looks like".into(),
+        //   &JsValue::from(d_x as u32),
+        //   &JsValue::from(d_y as u32),
+        // );
+
+        let t_1 = Matrix3::new( 1, 0, pivot_x,
+                                0, 1, pivot_y,
+                                0, 0, 1 );
+
+        let t_2 = Matrix3::new( 1, 0, -pivot_x,
+                                0, 1, -pivot_y,
+                                0, 0, 1 );
+
+        let rot = Matrix3::new( 0,    r_a, 0,
+                                r_b,  0,   0,
+                                0,    0,   1);
+
+        // console::log_4(
+        //   &JsValue::from(format!("{}", rotated_pos)),
+        //   &JsValue::from(format!("{}", t_2.to_homogeneous() * rotated_pos)),
+        //   &JsValue::from(format!("{}",  rot * t_2.to_homogeneous() * rotated_pos)),
+        //   &JsValue::from(format!("{}", result)),
+
+        // );
+        (t_1 * rot * t_2 * current_pos, next_rot_state)
+      }
+    }
   }
 
-  pub fn try_rotate(&self, dir: &RotationDirection) -> [Vec2<isize>; 4] {
-    let mut rotated_pos = self.pos.clone();
-
-    // let clockwise_rotation_matr = [Vec3()]
-    // translate to the pivot, then rotate
-    [Vec2(0, 0), Vec2(1, 0), Vec2(0, 1), Vec2(1, 1)]
-  }
-
-  pub fn try_move(&self, dir: &MoveDirection) -> [Vec2<isize>; 4] {
-    let mut moved_pos = self.pos.clone();
+  pub fn try_move(&self, dir: &MoveDirection) -> Matrix3x4<isize> {
+    let pos = self.pos.clone();
 
     use MoveDirection::*;
-    let delta = match dir {
-      Up => Vec2(0, -1),
-      Down => Vec2(0, 1),
-      Left => Vec2(-1, 0),
-      Right => Vec2(1, 0),
+    let (d_x, d_y) = match dir {
+      Up => (0, -1),
+      Down => (0, 1),
+      Left => (-1, 0),
+      Right => (1, 0),
     };
 
-    for p in &mut moved_pos {
-      *p += delta;
-    }
-    moved_pos
-  }
-}
+    let t = Matrix3::new( 1, 0, d_x,
+                          0, 1, d_y,
+                          0, 0, 1 );
 
+    t * pos
+  }
+
+}
 pub struct Square {
   length: f64,
   padding: f64,
@@ -336,7 +455,7 @@ impl Square {
   }
 
   // TODO create a trait for this
-  pub fn draw(&self, ctx: &CanvasRenderingContext2d, pos: Vec2<f64>, color: &str) {
+  pub fn draw(&self, ctx: &CanvasRenderingContext2d, pos: (f64, f64), color: &str) {
     let (l, p) = (self.length, self.padding);
     let (x, y) = (pos.0 * l, pos.1 * l);
     ctx.set_fill_style(&JsValue::from(color));
