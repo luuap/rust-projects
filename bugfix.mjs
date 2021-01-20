@@ -6,9 +6,9 @@ import * as fs from 'fs';
  * Call after wasm-pack build: node bugfix.mjs
  */
 function bugfix() {
-  const file = fs.readFileSync('pkg/algorithms_bg.js', 'utf-8');
+  const file = fs.readFileSync('pkg/wasm_demos_bg.js', 'utf-8');
   const fixed = file.replace('instanceof CanvasRenderingContext2D', 'instanceof OffscreenCanvasRenderingContext2D');
-  fs.writeFileSync('pkg/algorithms_bg.js', fixed, 'utf-8');
+  fs.writeFileSync('pkg/wasm_demos_bg.js', fixed, 'utf-8');
   console.log('Bugfix complete');
 }
 

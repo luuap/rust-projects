@@ -1,5 +1,5 @@
 [package]
-name = "algorithms"
+name = "wasm-demos"
 version = "0.1.0"
 authors = ["luuap <35545769+luuap@users.noreply.github.com>"]
 edition = "2018"

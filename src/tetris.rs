@@ -127,7 +127,7 @@ impl Tetris {
         };
         self.square.draw(
           &self.ctx,
-          ((i % 10) as f64, (i as f64 / PLAYFIELD_DIM.0 as f64).floor()),
+          ((i % PLAYFIELD_DIM.0) as f64, (i as f64 / PLAYFIELD_DIM.0 as f64).floor()),
           color,
         );
       }
