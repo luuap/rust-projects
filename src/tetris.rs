@@ -1,3 +1,5 @@
+use std::cell::RefCell;
+
 use getrandom;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
@@ -7,7 +9,7 @@ use web_sys::{CanvasRenderingContext2d, OffscreenCanvas, Performance};
 use nalgebra as na;
 use na::{Matrix3x4, Matrix3};
 
-const PLAYFIELD_DIM: (usize, usize) = (10, 20);
+const PLAYFIELD_DIM: (usize, usize) = (10, 20); // width, height
 
 #[derive(Copy, Clone)]
 pub enum RotationState {
@@ -29,8 +31,8 @@ impl RotationState {
   }
 }
 
+#[derive(Copy, Clone)]
 pub enum MoveDirection {
-  Up,
   Down,
   Left,
   Right,
@@ -42,7 +44,7 @@ pub enum RotationDirection {
   CounterClockwise,
 }
 
-pub enum TetrisActions {
+pub enum TetrisAction {
   Move(MoveDirection),
   Rotate(RotationDirection),
   // TODO drop
@@ -56,7 +58,7 @@ pub struct Tetris {
   canvas: OffscreenCanvas,
   square: Square,
   obj: Block,
-  playfield: Vec<u32>,
+  playfield: RefCell<Vec<u32>>,
   last_update_time: f64,
 }
 
@@ -64,6 +66,7 @@ pub struct Tetris {
 impl Tetris {
   #[wasm_bindgen(constructor)]
   pub fn new(canvas: OffscreenCanvas, options: &JsValue) -> Self {
+    console::log_1(&"[Tetris] Started game".into(),);
     let ctx = canvas
       .get_context_with_context_options("2d", options)
       .expect("Failed to get context")
@@ -71,13 +74,15 @@ impl Tetris {
       .dyn_into::<CanvasRenderingContext2d>()
       .unwrap();
 
+    canvas.set_width(canvas.height() / 2);
+
     let square = {
       let square_length = canvas.height() as f64 / PLAYFIELD_DIM.1 as f64;
       let square_padding = (square_length * 0.1_f64).sqrt();
       Square::new(square_length, square_padding)
     };
     let obj = Block::new(BlockType::S);
-    let playfield = vec![0; PLAYFIELD_DIM.0 * PLAYFIELD_DIM.1];
+    let playfield = RefCell::new(vec![0; PLAYFIELD_DIM.0 * PLAYFIELD_DIM.1]);
 
     // get timer from global scope
     let timer = js_sys::Reflect::get(&js_sys::global(), &JsValue::from_str("performance"))
@@ -108,7 +113,7 @@ impl Tetris {
     }
 
     // draw playfield
-    for (i, p) in self.playfield.iter().enumerate() {
+    for (i, p) in self.playfield.borrow().iter().enumerate() {
       if *p > 0 {
         let color = match *p {
           1 => "red",
@@ -130,7 +135,6 @@ impl Tetris {
   }
 
   pub fn clear(&self) {
-    // TODO: just clear the obj
     self.ctx.clear_rect(
       0_f64,
       0_f64,
@@ -144,7 +148,6 @@ impl Tetris {
     if now > self.last_update_time + 1000_f64 {
       self.last_update_time = now;
       if self.move_obj(MoveDirection::Down).is_err() {
-        let playfield = &mut self.playfield;
 
         // add the obj in playfield
         let block_type = self.obj.block_type as u32;
@@ -152,10 +155,10 @@ impl Tetris {
           .obj
           .pos
           .column_iter()
-          .for_each(|col| playfield[PLAYFIELD_DIM.0 * col[(1,0)] as usize + col[(0,0)] as usize] = block_type);
+          .for_each(|col| self.playfield.borrow_mut()[PLAYFIELD_DIM.0 * col[(1,0)] as usize + col[(0,0)] as usize] = block_type);
 
         // clear lines if any
-        let copy_map: Vec<(usize, usize)> = playfield
+        let copy_map: Vec<(usize, usize)> = self.playfield.borrow_mut()
           .chunks_exact(PLAYFIELD_DIM.0) // get each row
           .map(|chunk| chunk.iter().any(|&val| val == 0)) // find which rows will stay
           .enumerate() // get row numbers
@@ -173,16 +176,18 @@ impl Tetris {
           if i != j { // if line is going to drop
             let src_idx = i * PLAYFIELD_DIM.0;
             let dest_idx = j * PLAYFIELD_DIM.0;
-            playfield.copy_within(src_idx..(src_idx + PLAYFIELD_DIM.0), dest_idx); // copy over the row that will be dropping
-            for i in &mut playfield[src_idx..dest_idx] {
-              *i = 0
-            } // zero out the
+            self.playfield.borrow_mut().copy_within(src_idx..(src_idx + PLAYFIELD_DIM.0), dest_idx); // copy over the row that will be dropping
+            self.playfield.borrow_mut()[src_idx..dest_idx].iter_mut().for_each(|i| *i = 0); // clear the line that was moved
           }
         });
 
-        // try to spawn in a new obj (check if spawn area is cleared)
+        // try to spawn in a new obj
         let block_type = BlockType::get_random();
         self.obj = Block::new(block_type);
+        if !self.not_colliding(&self.obj.pos) {
+            // clear the board
+            self.playfield.borrow_mut().iter_mut().for_each(|i| *i = 0);
+        };
       };
     }
   }
@@ -192,10 +197,9 @@ impl Tetris {
     // TODO: do keymappings
     use MoveDirection::*;
     use RotationDirection::*;
-    use TetrisActions::*;
+    use TetrisAction::*;
 
     let action = match key {
-      "w" => Some(Move(Up)),
       "s" => Some(Move(Down)),
       "a" => Some(Move(Left)),
       "d" => Some(Move(Right)),
@@ -214,44 +218,49 @@ impl Tetris {
     };
   }
 
-  fn rotate_obj(&mut self, dir: RotationDirection) {
-    let (next_pos, next_rot_state) = self.obj.try_rotate(dir);
-    // TODO: check if we can rotate
-    self.obj.pos= next_pos;
-    self.obj.rot_state = next_rot_state;
+  pub fn resize(&mut self, _width: u32, height: u32) {
+    self.canvas.set_width(height / 2);
+    self.canvas.set_height(height);
+    self.square = {
+      let square_length = self.canvas.height() as f64 / PLAYFIELD_DIM.1 as f64;
+      let square_padding = (square_length * 0.1_f64).sqrt();
+      Square::new(square_length, square_padding)
+    };
+    self.render();
   }
 
-  fn move_obj(&mut self, dir: MoveDirection) -> Result<(), ()> {
-    // return a result because we are using this method to check if block will freeze
-    let next_pos = self.obj.try_move(&dir);
-    // check if in bounds
-    use MoveDirection::*;
-    let within_bounds: bool = match dir {
-      // TODO: puts great assumption on the last moves were valid (if we were to be in an invalid state, some checks will not be run)
-      Up => false,
-      Down => next_pos
-        .column_iter()
-        .all(|col| col[(1, 0)] < PLAYFIELD_DIM.1 as isize), // y val
-      Left => next_pos
-        .column_iter()
-        .all(|col| col[(0, 0)] >= 0), // x val
-      Right => next_pos
-        .column_iter()
-        .all(|col| col[(0, 0)] < PLAYFIELD_DIM.0 as isize),
+  fn rotate_obj(&mut self, dir: RotationDirection) {
+    let (next_pos, next_rot_state) = self.obj.try_rotate(dir);
+    if self.within_bounds(&next_pos) && self.not_colliding(&next_pos) {
+      self.obj.pos = next_pos;
+      self.obj.rot_state = next_rot_state;
     };
+  }
 
-    // check if block is going to freeze
-    let can_move: bool = within_bounds
-      && next_pos
-        .column_iter()
-        .all(|col| self.playfield[PLAYFIELD_DIM.0 * col[(1, 0)] as usize + col[(0, 0)] as usize] == 0);
-
-    if can_move {
+  fn move_obj(&mut self, dir: MoveDirection) -> Result<(), ()> { // return a result because we are using this method to check if block will freeze
+    let next_pos = self.obj.try_move(dir);
+    if self.within_bounds(&next_pos) && self.not_colliding(&next_pos) {
       self.obj.pos = next_pos;
       Ok(())
     } else {
       Err(())
     }
+  }
+
+  fn not_colliding(&self, pos: &Matrix3x4<isize>) -> bool {
+    pos
+      .column_iter()
+      .all(|col| self.playfield.borrow()[PLAYFIELD_DIM.0 * col[(1, 0)] as usize + col[(0, 0)] as usize] == 0)
+  }
+
+  fn within_bounds(&self, pos: &Matrix3x4<isize>) -> bool {
+    pos
+      .column_iter()
+      .all(|col| {
+        col[(1, 0)] < PLAYFIELD_DIM.1 as isize &&
+        col[(0, 0)] >= 0 &&
+        col[(0, 0)] < PLAYFIELD_DIM.0 as isize
+      })
   }
 }
 
@@ -268,6 +277,41 @@ pub enum BlockType {
   S,
   T,
   Z,
+}
+
+impl BlockType {
+  fn get_inital(&self) -> (Matrix3x4<isize>, &'static str, usize) { // the last value is the ith column in the matrix
+    // blocks are initially shifted 3 to the right TODO: base the offset on width instead of hardcoding
+    match *self {
+      Self::I => (Matrix3x4::new(3, 4, 5, 6,
+                                 2, 2, 2, 2,
+                                 1, 1, 1, 1), "red", 2),
+
+      Self::J => (Matrix3x4::new(3, 4, 5, 5,
+                                 1, 1, 1, 2,
+                                 1, 1, 1, 1), "orange", 1),
+
+      Self::L => (Matrix3x4::new(3, 4, 5, 5,
+                                 1, 1, 1, 0,
+                                 1, 1, 1, 1), "yellow", 1),
+
+      Self::O => (Matrix3x4::new(4, 4, 5, 5,
+                                 1, 2, 1, 2,
+                                 1, 1, 1, 1), "green", 0),
+
+      Self::S => (Matrix3x4::new(4, 5, 3, 4,
+                                 1, 1, 2, 2,
+                                 1, 1, 1, 1), "blue", 0),
+
+      Self::T => (Matrix3x4::new(3, 4, 4, 5,
+                                 1, 1, 2, 1,
+                                 1, 1, 1, 1), "indigo", 1),
+
+      Self::Z => (Matrix3x4::new(3, 4, 4, 5,
+                                 1, 1, 2, 2,
+                                 1, 1, 1, 1), "pink", 1),
+    }
+  }
 }
 
 impl Randomizable for BlockType {
@@ -291,48 +335,19 @@ pub struct Block {
   pub rot_state: RotationState,
   pub block_type: BlockType,
   pub pos: Matrix3x4<isize>,
-  // TODO: pointers pointing to pivot
+  pub pivot_idx: usize,
 }
 
 impl Block {
   pub fn new(block_type: BlockType) -> Self {
-    use BlockType::*;
 
-    let (pos, color) = match block_type {
-      // TODO random rotation
-      I => (Matrix3x4::new(0, 1, 2, 3,
-                           2, 2, 2, 2,
-                           1, 1, 1, 1), "red"),
-
-      J => (Matrix3x4::new(0, 1, 2, 2,
-                           1, 1, 1, 2,
-                           1, 1, 1, 1), "orange"),
-
-      L => (Matrix3x4::new(0, 1, 2, 2,
-                           1, 1, 1, 0,
-                           1, 1, 1, 1), "yellow"),
-
-      O => (Matrix3x4::new(1, 1, 2, 2,
-                           1, 2, 1, 2,
-                           1, 1, 1, 1), "green"),
-
-      S => (Matrix3x4::new(1, 2, 0, 1,
-                           1, 1, 2, 2,
-                           1, 1, 1, 1), "blue"),
-
-      T => (Matrix3x4::new(0, 1, 1, 2,
-                           1, 1, 2, 1,
-                           1, 1, 1, 1), "indigo"),
-
-      Z => (Matrix3x4::new(0, 1, 1, 2,
-                           1, 1, 2, 2,
-                           1, 1, 1, 1), "pink"),
-    };
+    let (pos, color, pivot_idx) = block_type.get_inital();
 
     let rot_state = RotationState::Deg0;
 
     Self {
       pos,
+      pivot_idx,
       color,
       block_type,
       rot_state,
@@ -350,10 +365,10 @@ impl Block {
         
         use RotationState::*;
         match (self.block_type, self.rot_state) {
+          // I block has only two states, 0 and 90
+          // if 0, rotate clockwise
+          // if 90, rotate cclockwise
           (I, Deg0) => {
-            // only two states, 0 and 90
-            // if 0, rotate clockwise
-            // if 90, rotate cclockwise
             next_rot_state = Deg90;
             dir = Clockwise;
           },
@@ -364,10 +379,10 @@ impl Block {
           (J, _) | (L, _) | (T, _) => {
             next_rot_state = self.rot_state.get_next_state(dir);
           },
+          // S and z blocks have only two states, 0 and 270
+          // if 0, rotate cclockwise
+          // if 270, rotate clockwise 
           (S, Deg0) | (Z, Deg0)=> {
-            // only two states, 0 and 270
-            // if 0, rotate cclockwise
-            // if 270, rotate clockwise 
             next_rot_state = Deg270;
             dir = CounterClockwise;
           },
@@ -379,27 +394,13 @@ impl Block {
         };
 
         // get pivot
-        let (pivot_x, pivot_y) = match self.block_type {
-          I => (current_pos[(0, 2)], current_pos[(1, 2)]),
-          J => (current_pos[(0, 1)], current_pos[(1, 1)]),
-          L => (current_pos[(0, 1)], current_pos[(1, 1)]),
-          O => (current_pos[(0, 0)], current_pos[(1, 0)]),
-          S => (current_pos[(0, 0)], current_pos[(1, 0)]),
-          T => (current_pos[(0, 1)], current_pos[(1, 1)]),
-          Z => (current_pos[(0, 1)], current_pos[(1, 1)]),
-        };
+        let (pivot_x, pivot_y) = (current_pos[(0, self.pivot_idx)], current_pos[(1, self.pivot_idx)]);
 
         use RotationDirection::*;
         let (r_a, r_b) = match dir { 
           Clockwise => (-1, 1),
           CounterClockwise => (1, -1),
         };
-
-        // console::log_3(
-        //   &"Logging arbitrary values looks like".into(),
-        //   &JsValue::from(d_x as u32),
-        //   &JsValue::from(d_y as u32),
-        // );
 
         let t_1 = Matrix3::new( 1, 0, pivot_x,
                                 0, 1, pivot_y,
@@ -413,37 +414,30 @@ impl Block {
                                 r_b,  0,   0,
                                 0,    0,   1);
 
-        // console::log_4(
-        //   &JsValue::from(format!("{}", rotated_pos)),
-        //   &JsValue::from(format!("{}", t_2.to_homogeneous() * rotated_pos)),
-        //   &JsValue::from(format!("{}",  rot * t_2.to_homogeneous() * rotated_pos)),
-        //   &JsValue::from(format!("{}", result)),
-
-        // );
         (t_1 * rot * t_2 * current_pos, next_rot_state)
       }
     }
   }
 
-  pub fn try_move(&self, dir: &MoveDirection) -> Matrix3x4<isize> {
+  pub fn try_move(&self, dir: MoveDirection) -> Matrix3x4<isize> {
     let pos = self.pos.clone();
 
     use MoveDirection::*;
     let (d_x, d_y) = match dir {
-      Up => (0, -1),
       Down => (0, 1),
       Left => (-1, 0),
       Right => (1, 0),
     };
 
-    let t = Matrix3::new( 1, 0, d_x,
-                          0, 1, d_y,
-                          0, 0, 1 );
+    let t = Matrix3::new(1, 0, d_x,
+                         0, 1, d_y,
+                         0, 0, 1 );
 
     t * pos
   }
 
 }
+
 pub struct Square {
   length: f64,
   padding: f64,
