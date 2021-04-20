@@ -1,6 +1,7 @@
 mod utils;
 mod sliding_square;
 mod tetris;
+mod tetris_engine;
 
 use wasm_bindgen::prelude::*;
 // use wasm_bindgen::JsCast;
