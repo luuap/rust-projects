@@ -1,6 +1,15 @@
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
+use js_sys::{Uint32Array};
 use web_sys::{CanvasRenderingContext2d, OffscreenCanvas};
+
+#[derive(Copy, Clone)]
+pub enum MoveDirection {
+  Up = 0,
+  Down,
+  Left,
+  Right,
+}
 
 #[wasm_bindgen]
 pub struct SlidingSquare {
@@ -27,6 +36,10 @@ impl SlidingSquare {
     }
   }
 
+  pub fn update(&self) {
+    ()
+  }
+
   pub fn render(&self) {
     self.obj.draw(&self.ctx);
   }
@@ -40,11 +53,31 @@ impl SlidingSquare {
     );
   }
 
-  #[wasm_bindgen(js_name = handleKeyboardInput)]
-  pub fn handle_keyboard_input(&mut self, key: &str) {
-    // TODO: do keymappings
-    self.obj.r#move(key);
+  #[wasm_bindgen(js_name = handleInput)]
+  pub fn handle_input(&mut self, key: i32) {
+    use MoveDirection::*;
+    match key {
+      0 => self.obj.r#move(Up),
+      1 => self.obj.r#move(Down),
+      2 => self.obj.r#move(Left),
+      3 => self.obj.r#move(Right),
+      _ => ()
+    }
   }
+
+  pub fn resize(&mut self, width: u32, height: u32) -> Uint32Array {
+
+    let reference_length = std::cmp::min(width, height);
+    let (new_width, new_height) = (reference_length, reference_length);
+    self.canvas.set_width(new_width);
+    self.canvas.set_height(new_height);
+    self.obj = Square::new(&self.canvas);
+
+    self.render();
+    let res: &[u32] = &[new_width, new_height];
+    Uint32Array::from(res)
+  }
+
 }
 
 pub struct Square {
@@ -69,13 +102,13 @@ impl Square {
     }
   }
 
-  pub fn r#move(&mut self, dir: &str) {
+  pub fn r#move(&mut self, dir: MoveDirection) {
+    use MoveDirection::*;
     match dir {
-      "w" => self.y = (self.y - self.bounds.1 / 10.).max(0.),
-      "s" => self.y = (self.y + self.bounds.1 / 10.).min((self.bounds.1) - self.length),
-      "a" => self.x = (self.x - self.bounds.0 / 10.).max(0.),
-      "d" => self.x = (self.x + self.bounds.0 / 10.).min((self.bounds.0) - self.length),
-      _ => (),
+      Up => self.y = (self.y - self.bounds.1 / 10.).max(0.),
+      Down => self.y = (self.y + self.bounds.1 / 10.).min((self.bounds.1) - self.length),
+      Left => self.x = (self.x - self.bounds.0 / 10.).max(0.),
+      Right => self.x = (self.x + self.bounds.0 / 10.).min((self.bounds.0) - self.length)
     }
   }
 

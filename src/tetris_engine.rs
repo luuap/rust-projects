@@ -1,24 +1,33 @@
 use getrandom;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
+use js_sys::{Uint32Array};
 use web_sys::console;
 use web_sys::{CanvasRenderingContext2d, OffscreenCanvas, Performance};
-use crate::tetris::{Tetris, TetrisBuilder, Randomizer};
+use crate::tetris::{Tetris, TetrisBuilder, Randomizer, MoveDirection, RotationDirection, TetrisAction};
 
 const PLAYFIELD_DIM: (usize, usize) = (10, 20); // width, height
 
+/**
+ * Input Ids
+ * 0 - Down
+ * 1 - Left
+ * 2 - Right
+ * 3 - Rotate counteclockwise
+ * 4 - Rotate clockwise
+ */
 #[wasm_bindgen]
-pub struct TetrisEngine {
+pub struct WebTetrisEngine {
   timer: Performance,
   ctx: CanvasRenderingContext2d, // TODO: must be OffscreenCanvasRenderingContext2d, but it's not added in yet
   canvas: OffscreenCanvas,
-  square: Square,
+  square_drawer: SquareDrawer,
   tetris: Tetris, // tetris logic and state
   last_update_time: f64,
 }
 
 #[wasm_bindgen]
-impl TetrisEngine {
+impl WebTetrisEngine {
   #[wasm_bindgen(constructor)]
   pub fn new(canvas: OffscreenCanvas, options: &JsValue) -> Self {
     console::log_1(&"[Tetris] Started game".into(),);
@@ -31,10 +40,10 @@ impl TetrisEngine {
 
     canvas.set_width(canvas.height() / 2);
 
-    let square = {
+    let square_drawer = {
       let square_length = canvas.height() as f64 / PLAYFIELD_DIM.1 as f64;
       let square_padding = (square_length * 0.1_f64).sqrt();
-      Square::new(square_length, square_padding)
+      SquareDrawer::new(square_length, square_padding)
     };
 
     // get timer from global scope
@@ -69,7 +78,7 @@ impl TetrisEngine {
       timer,
       ctx,
       canvas,
-      square,
+      square_drawer,
       tetris,
       last_update_time,
     }
@@ -80,23 +89,25 @@ impl TetrisEngine {
     // draw object
     for col in self.tetris.curr_block.pos.column_iter() {
       self
-        .square
-        .draw(&self.ctx, (col[(0, 0)] as f64, col[(1, 0)] as f64), self.match_color(self.tetris.curr_block.block_type as u32));
+        .square_drawer
+        .draw(&self.ctx, (col[(0, 0)] as f64, col[(1, 0)] as f64), Self::match_color(self.tetris.curr_block.block_type as u32));
     }
 
     // draw playfield
     for (i, p) in self.tetris.playfield.borrow().iter().enumerate() {
       if *p > 0 {
-        self.square.draw(
-          &self.ctx,
-          ((i % PLAYFIELD_DIM.0) as f64, (i as f64 / PLAYFIELD_DIM.0 as f64).floor()),
-          self.match_color(*p),
-        );
+        self
+          .square_drawer
+          .draw(
+            &self.ctx,
+            ((i % PLAYFIELD_DIM.0) as f64, (i as f64 / PLAYFIELD_DIM.0 as f64).floor()),
+            Self::match_color(*p),
+          );
       }
     }
   }
 
-  fn match_color(&self, n: u32) -> &'static str {
+  fn match_color(n: u32) -> &'static str {
     match n {
       1 => "red",
       2 => "orange",
@@ -126,36 +137,58 @@ impl TetrisEngine {
     }
   }
 
-  #[wasm_bindgen(js_name = handleKeyboardInput)]
-  pub fn handle_keyboard_input(&mut self, key: &str) {
-    // TODO: do keymappings with enums
-    self.tetris.do_action(key);
+  #[wasm_bindgen(js_name = handleInput)]
+  pub fn handle_input(&mut self, key: u32) {
+    
+    use MoveDirection::*;
+    use RotationDirection::*;
+    use TetrisAction::*;
+
+    // TODO: create macro/test to ensure all variants of TetrisAction are returned
+    // https://stackoverflow.com/questions/58715081/how-to-ensure-every-enum-variant-can-be-returned-from-a-specific-function-at-com
+
+    let action = match key {
+      0 => Some(Move(Down)),
+      1 => Some(Move(Left)),
+      2 => Some(Move(Right)),
+      3 => Some(Rotate(CounterClockwise)),
+      4 => Some(Rotate(Clockwise)),
+      _ => None,
+    };
+
+    if let Some(action) = action {
+      self.tetris.do_action(action);
+    };
+
   }
 
-  pub fn resize(&mut self, _width: u32, height: u32) {
-    self.canvas.set_width(height / 2);
-    self.canvas.set_height(height);
-    self.square = {
+  pub fn resize(&mut self, _width: u32, height: u32) -> Uint32Array {
+
+    let (new_width, new_height) = (height / 2, height);
+    self.canvas.set_width(new_width);
+    self.canvas.set_height(new_height);
+    self.square_drawer = {
       let square_length = self.canvas.height() as f64 / PLAYFIELD_DIM.1 as f64;
       let square_padding = (square_length * 0.1_f64).sqrt();
-      Square::new(square_length, square_padding)
+      SquareDrawer::new(square_length, square_padding)
     };
     self.render();
+    let res: &[u32] = &[new_width, new_height];
+    Uint32Array::from(res)
   }
 
 }
 
-pub struct Square {
+pub struct SquareDrawer {
   length: f64,
   padding: f64,
 }
 
-impl Square {
+impl SquareDrawer {
   pub fn new(length: f64, padding: f64) -> Self {
     Self { length, padding }
   }
 
-  // TODO create a trait for this
   pub fn draw(&self, ctx: &CanvasRenderingContext2d, pos: (f64, f64), color: &str) {
     let (l, p) = (self.length, self.padding);
     let (x, y) = (pos.0 * l, pos.1 * l);

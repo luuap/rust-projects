@@ -105,7 +105,6 @@ impl BlockType {
 }
 
 pub struct Block {
-  // pub color: &'static str,
   pub rot_state: RotationState,
   pub block_type: BlockType,
   pub pos: Matrix3x4<isize>,
@@ -122,7 +121,6 @@ impl Block {
     Self {
       pos,
       pivot_idx,
-      // color,
       block_type,
       rot_state,
     }
@@ -296,27 +294,14 @@ impl Tetris {
     };
   }
 
-  pub fn do_action(&mut self, key: &str) {
-    use MoveDirection::*;
-    use RotationDirection::*;
+  pub fn do_action(&mut self, action: TetrisAction) {
     use TetrisAction::*;
 
-    let action = match key {
-      "s" => Some(Move(Down)),
-      "a" => Some(Move(Left)),
-      "d" => Some(Move(Right)),
-      "q" => Some(Rotate(CounterClockwise)),
-      "e" => Some(Rotate(Clockwise)),
-      _ => None,
-    };
-
-    if let Some(action) = action {
-      match action {
-        Move(dir) => {
-          let _ = self.move_obj(dir).ok();
-        }
-        Rotate(dir) => self.rotate_obj(dir),
+    match action {
+      Move(dir) => {
+        let _ = self.move_obj(dir).ok();
       }
+      Rotate(dir) => self.rotate_obj(dir),
     };
   }
 
