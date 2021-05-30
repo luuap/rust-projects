@@ -1,11 +1,24 @@
+mod utils;
+mod sliding_square;
+
 use getrandom;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 use js_sys::{Uint32Array};
-use web_sys::console;
-use web_sys::{CanvasRenderingContext2d, OffscreenCanvas, Performance};
-use crate::tetris::{Tetris, TetrisBuilder, Randomizer, MoveDirection, RotationDirection, TetrisAction};
+use web_sys::{console, CanvasRenderingContext2d, OffscreenCanvas, Performance};
+use tetris::{Tetris, TetrisBuilder, Randomizer, MoveDirection, RotationDirection, TetrisAction};
 
+#[cfg(feature = "wee_alloc")]
+#[global_allocator]
+static ALLOC: wee_alloc::WeeAlloc = wee_alloc::WeeAlloc::INIT;
+
+#[wasm_bindgen(start)]
+pub fn run() {
+    console::log_1(&"[wasm] Initialized".into());
+    utils::set_panic_hook();
+}
+
+// TODO: make this customizable
 const PLAYFIELD_DIM: (usize, usize) = (10, 20); // width, height
 
 /**
@@ -17,7 +30,7 @@ const PLAYFIELD_DIM: (usize, usize) = (10, 20); // width, height
  * 4 - Rotate clockwise
  */
 #[wasm_bindgen]
-pub struct WebTetrisEngine {
+pub struct WebTetris {
   timer: Performance,
   ctx: CanvasRenderingContext2d, // TODO: must be OffscreenCanvasRenderingContext2d, but it's not added in yet
   canvas: OffscreenCanvas,
@@ -27,7 +40,7 @@ pub struct WebTetrisEngine {
 }
 
 #[wasm_bindgen]
-impl WebTetrisEngine {
+impl WebTetris {
   #[wasm_bindgen(constructor)]
   pub fn new(canvas: OffscreenCanvas, options: &JsValue) -> Self {
     console::log_1(&"[Tetris] Started game".into(),);
@@ -162,6 +175,7 @@ impl WebTetrisEngine {
 
   }
 
+  // TODO rename to set_size
   pub fn resize(&mut self, _width: u32, height: u32) -> Uint32Array {
 
     let (new_width, new_height) = (height / 2, height);
