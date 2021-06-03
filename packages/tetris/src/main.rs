@@ -68,15 +68,10 @@ fn main() {
     }),
   }.build();
 
-  // let mut tetris = Tetris::new(Box::new(MyRandomizer { 
-  //     rng: rand::thread_rng()
-  // }));
-
   use MoveDirection::*;
   use RotationDirection::*;
   use TetrisAction::*;
 
-  // tetris.update();
   tetris.do_action(Move(Down));
   tetris.do_action(Move(Down));
   tetris.do_action(Move(Down));

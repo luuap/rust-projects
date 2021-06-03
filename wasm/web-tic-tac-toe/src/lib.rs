@@ -25,6 +25,10 @@ pub struct InputData {
 #[global_allocator]
 static ALLOC: wee_alloc::WeeAlloc = wee_alloc::WeeAlloc::INIT;
 
+/**
+ Input Ids:
+ * 0 - $Click
+ */
 #[wasm_bindgen]
 pub struct WebTicTacToe {
   game: TicTacToeGame,  
@@ -130,6 +134,11 @@ impl WebTicTacToe {
     );
   }
 
+  /**
+  Note: data must have the shape { x: number, y: number }.
+  Typings for plain-object JsValue parameters are not yet supported
+  {@link https://github.com/rustwasm/wasm-bindgen/issues/1591}.
+  */
   #[wasm_bindgen(js_name = handleInput)]
   pub fn handle_input(&mut self, key: u32, data: &JsValue) {
 
@@ -143,14 +152,15 @@ impl WebTicTacToe {
           let x = data.coordinates.x;
           let y = data.coordinates.y;
 
-          // Note: need to do some input sanitization
+          // Normalize the coordinates
+          // Note: clamp between 0 and 2 because they are the min and max of row/col indices
+          //       floor because we only care about the index
           let x_index = ((x / third).floor() as u32).clamp(0, 2);
           let y_index = ((y / third).floor() as u32).clamp(0, 2);
 
-          // let str = format!("[WASM] x:{}, xi:{}, y:{}, yi: {}", x, x_index,  y, y_index);
-          // console::log_1(&str.into());
-
+          // Flatten the index
           let index = y_index * 3 + x_index;
+
           self.game.do_move(index);
 
         }
@@ -160,7 +170,7 @@ impl WebTicTacToe {
   }
 
   pub fn resize(&mut self, width: u32, height: u32) -> Uint32Array {
-    // Canvas is a square with side lengths equal to the smallest length of the container
+    // Note: Canvas is a square with side lengths equal to the smallest length of the container
     let min_length = std::cmp::min(width, height);
     self.canvas.set_width(min_length);
     self.canvas.set_height(min_length);
@@ -173,6 +183,5 @@ impl WebTicTacToe {
 
 #[wasm_bindgen(start)]
 pub fn run() {
-  // console::log_1(&"[WASM] Initialized WebTIcTacToe".into());
   utils::set_panic_hook();
 }
