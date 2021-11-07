@@ -2,8 +2,7 @@ mod utils;
 
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
-use js_sys::{Uint32Array};
-use web_sys::{console, CanvasRenderingContext2d, OffscreenCanvas};
+use web_sys::{CanvasRenderingContext2d, OffscreenCanvas};
 use serde::{Serialize, Deserialize};
 
 use tic_tac_toe::{ TicTacToeGame, PlayerType, GameState, WinningPattern };
@@ -169,14 +168,12 @@ impl WebTicTacToe {
     }
   }
 
-  pub fn resize(&mut self, width: u32, height: u32) -> Uint32Array {
+  // Note: this is made redundant because we are providing the aspect ratio, and control of how it is rendered is given to the renderer
+  pub fn resize(&mut self, width: u32, height: u32) {
     // Note: Canvas is a square with side lengths equal to the smallest length of the container
-    let min_length = std::cmp::min(width, height);
-    self.canvas.set_width(min_length);
-    self.canvas.set_height(min_length);
+    self.canvas.set_width(width);
+    self.canvas.set_height(height);
     self.render();
-    let res: &[u32] = &[min_length, min_length];
-    Uint32Array::from(res)
   }
   
 }

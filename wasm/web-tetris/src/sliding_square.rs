@@ -1,6 +1,5 @@
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
-use js_sys::{Uint32Array};
 use web_sys::{CanvasRenderingContext2d, OffscreenCanvas};
 
 #[derive(Copy, Clone)]
@@ -65,17 +64,12 @@ impl SlidingSquare {
     }
   }
 
-  pub fn resize(&mut self, width: u32, height: u32) -> Uint32Array {
-
-    let reference_length = std::cmp::min(width, height);
-    let (new_width, new_height) = (reference_length, reference_length);
-    self.canvas.set_width(new_width);
-    self.canvas.set_height(new_height);
+  pub fn resize(&mut self, width: u32, height: u32) {
+    self.canvas.set_width(width);
+    self.canvas.set_height(height);
     self.obj = Square::new(&self.canvas);
 
     self.render();
-    let res: &[u32] = &[new_width, new_height];
-    Uint32Array::from(res)
   }
 
 }

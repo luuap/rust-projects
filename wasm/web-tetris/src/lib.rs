@@ -4,7 +4,6 @@ mod sliding_square;
 use getrandom;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
-use js_sys::{Uint32Array};
 use web_sys::{console, CanvasRenderingContext2d, OffscreenCanvas, Performance};
 use tetris::{Tetris, TetrisBuilder, Randomizer, MoveDirection, RotationDirection, TetrisAction};
 
@@ -176,19 +175,16 @@ impl WebTetris {
   }
 
   // TODO rename to set_size
-  pub fn resize(&mut self, _width: u32, height: u32) -> Uint32Array {
+  pub fn resize(&mut self, width: u32, height: u32) {
 
-    let (new_width, new_height) = (height / 2, height);
-    self.canvas.set_width(new_width);
-    self.canvas.set_height(new_height);
+    self.canvas.set_width(width);
+    self.canvas.set_height(height);
     self.square_drawer = {
       let square_length = self.canvas.height() as f64 / PLAYFIELD_DIM.1 as f64;
       let square_padding = (square_length * 0.1_f64).sqrt();
       SquareDrawer::new(square_length, square_padding)
     };
     self.render();
-    let res: &[u32] = &[new_width, new_height];
-    Uint32Array::from(res)
   }
 
 }
